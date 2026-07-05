@@ -131,52 +131,62 @@ def run_structured_assessment(event: dict[str, Any], client_record: dict[str, An
     if client is None:
         return build_fallback_assessment(event, client_record, "Vertex AI client unavailable")
 
-    try:
-        prompt = build_risk_prompt(event, client_record)
-        config = types.GenerateContentConfig(
-            response_schema=RiskAssessment,
-            response_mime_type="application/json",
-            temperature=0,
-        )
-        result = client.models.generate_content(
-            model="gemini-2.5-pro",
-            contents=prompt,
-            config=config,
-        )
-        parsed = getattr(result, "parsed", None)
-        if parsed is not None:
-            return parsed
-        if getattr(result, "text", None):
-            return RiskAssessment.model_validate_json(result.text)
-    except Exception as exc:  # pragma: no cover - runtime guard
-        logger.exception("Structured assessment failed for %s", client_record.get("client_id"))
-        return build_fallback_assessment(event, client_record, str(exc))
+    models_to_try = ["gemini-2.5-pro", "gemini-2.0-flash-001"]
+    last_error = None
 
-    return build_fallback_assessment(event, client_record, "No structured response returned")
+    for model_name in models_to_try:
+        try:
+            prompt = build_risk_prompt(event, client_record)
+            config = types.GenerateContentConfig(
+                response_schema=RiskAssessment,
+                response_mime_type="application/json",
+                temperature=0,
+            )
+            result = client.models.generate_content(
+                model=model_name,
+                contents=prompt,
+                config=config,
+            )
+            parsed = getattr(result, "parsed", None)
+            if parsed is not None:
+                return parsed
+            if getattr(result, "text", None):
+                return RiskAssessment.model_validate_json(result.text)
+        except Exception as exc:  # pragma: no cover - runtime guard
+            last_error = exc
+            logger.warning("Structured assessment failed with %s: %s", model_name, exc)
+
+    return build_fallback_assessment(event, client_record, str(last_error or "No structured response returned"))
 
 
 def run_adverse_media_check(client_record: dict[str, Any], event: dict[str, Any]) -> str:
     if client is None:
         return "Vertex AI grounding unavailable; manual adverse media review required."
 
-    try:
-        search_prompt = (
-            f"Gather recent adverse media or enforcement signals for {client_record['name']} in relation to "
-            f"{event.get('title', '')}. Provide a short summary with factual references only."
-        )
-        config = types.GenerateContentConfig(
-            tools=[types.Tool(google_search=types.GoogleSearch())],
-            temperature=0,
-        )
-        result = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=search_prompt,
-            config=config,
-        )
-        return getattr(result, "text", "No grounding results returned")
-    except Exception as exc:  # pragma: no cover - runtime guard
-        logger.exception("Adverse media check failed for %s", client_record.get("client_id"))
-        return f"Grounding unavailable: {exc}"
+    models_to_try = ["gemini-2.5-flash", "gemini-2.0-flash-001"]
+    last_error = None
+
+    for model_name in models_to_try:
+        try:
+            search_prompt = (
+                f"Gather recent adverse media or enforcement signals for {client_record['name']} in relation to "
+                f"{event.get('title', '')}. Provide a short summary with factual references only."
+            )
+            config = types.GenerateContentConfig(
+                tools=[types.Tool(google_search=types.GoogleSearch())],
+                temperature=0,
+            )
+            result = client.models.generate_content(
+                model=model_name,
+                contents=search_prompt,
+                config=config,
+            )
+            return getattr(result, "text", "No grounding results returned")
+        except Exception as exc:  # pragma: no cover - runtime guard
+            last_error = exc
+            logger.warning("Grounding failed with %s: %s", model_name, exc)
+
+    return f"Grounding unavailable: {last_error or 'No grounding response returned'}"
 
 
 @app.get("/health")

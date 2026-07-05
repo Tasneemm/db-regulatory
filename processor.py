@@ -22,7 +22,11 @@ os.environ.setdefault("GOOGLE_GENAI_USE_ENTERPRISE", "True")
 PROJECT_ID = os.getenv("GOOGLE_CLOUD_PROJECT", "your-project-id")
 REGION = os.getenv("GOOGLE_CLOUD_LOCATION", "europe-west3")
 
-client = genai.Client()
+try:
+    client = genai.Client()
+except Exception as exc:  # pragma: no cover - runtime guard
+    logger.warning("Vertex AI client initialization failed: %s", exc)
+    client = None
 
 
 class RiskAssessment(BaseModel):
@@ -108,39 +112,71 @@ def build_risk_prompt(event: dict[str, Any], client_record: dict[str, Any]) -> s
     )
 
 
+def build_fallback_assessment(event: dict[str, Any], client_record: dict[str, Any], reason: str) -> RiskAssessment:
+    event_text = " ".join([event.get("title", ""), event.get("summary", ""), event.get("source", "")]).lower()
+    regulatory_match = any(term in event_text for term in ["regulatory", "aml", "sanctions", "guidance", "enforcement", "cyber", "prudential", "compliance"])
+    risk_level = "HIGH" if regulatory_match and client_record.get("risk_tier") == "HIGH" else "MEDIUM"
+    return RiskAssessment(
+        client_id=client_record.get("client_id", "unknown"),
+        client_name=client_record.get("name", "Unknown client"),
+        regulatory_match=regulatory_match,
+        risk_level=risk_level,
+        summary=f"Fallback assessment due to model unavailability: {reason}",
+        recommended_action="Manually review the event and verify the compliance signal with the local team.",
+        evidence=[f"Model unavailable: {reason}"],
+    )
+
+
 def run_structured_assessment(event: dict[str, Any], client_record: dict[str, Any]) -> RiskAssessment:
-    prompt = build_risk_prompt(event, client_record)
-    config = types.GenerateContentConfig(
-        response_schema=RiskAssessment,
-        response_mime_type="application/json",
-        temperature=0,
-    )
-    result = client.models.generate_content(
-        model="gemini-2.5-pro",
-        contents=prompt,
-        config=config,
-    )
-    parsed = getattr(result, "parsed", None)
-    if parsed is not None:
-        return parsed
-    return RiskAssessment.model_validate_json(result.text)
+    if client is None:
+        return build_fallback_assessment(event, client_record, "Vertex AI client unavailable")
+
+    try:
+        prompt = build_risk_prompt(event, client_record)
+        config = types.GenerateContentConfig(
+            response_schema=RiskAssessment,
+            response_mime_type="application/json",
+            temperature=0,
+        )
+        result = client.models.generate_content(
+            model="gemini-2.5-pro",
+            contents=prompt,
+            config=config,
+        )
+        parsed = getattr(result, "parsed", None)
+        if parsed is not None:
+            return parsed
+        if getattr(result, "text", None):
+            return RiskAssessment.model_validate_json(result.text)
+    except Exception as exc:  # pragma: no cover - runtime guard
+        logger.exception("Structured assessment failed for %s", client_record.get("client_id"))
+        return build_fallback_assessment(event, client_record, str(exc))
+
+    return build_fallback_assessment(event, client_record, "No structured response returned")
 
 
 def run_adverse_media_check(client_record: dict[str, Any], event: dict[str, Any]) -> str:
-    search_prompt = (
-        f"Gather recent adverse media or enforcement signals for {client_record['name']} in relation to "
-        f"{event.get('title', '')}. Provide a short summary with factual references only."
-    )
-    config = types.GenerateContentConfig(
-        tools=[types.Tool(google_search=types.GoogleSearch())],
-        temperature=0,
-    )
-    result = client.models.generate_content(
-        model="gemini-2.5-flash",
-        contents=search_prompt,
-        config=config,
-    )
-    return getattr(result, "text", "No grounding results returned")
+    if client is None:
+        return "Vertex AI grounding unavailable; manual adverse media review required."
+
+    try:
+        search_prompt = (
+            f"Gather recent adverse media or enforcement signals for {client_record['name']} in relation to "
+            f"{event.get('title', '')}. Provide a short summary with factual references only."
+        )
+        config = types.GenerateContentConfig(
+            tools=[types.Tool(google_search=types.GoogleSearch())],
+            temperature=0,
+        )
+        result = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=search_prompt,
+            config=config,
+        )
+        return getattr(result, "text", "No grounding results returned")
+    except Exception as exc:  # pragma: no cover - runtime guard
+        logger.exception("Adverse media check failed for %s", client_record.get("client_id"))
+        return f"Grounding unavailable: {exc}"
 
 
 @app.get("/health")

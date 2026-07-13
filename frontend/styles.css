@@ -1,0 +1,54 @@
+:root {
+	--db-blue: #003087;
+	--db-blue-dark: #00275c;
+	--db-yellow: #ffcc00;
+	--content-bg: #f4f7fb;
+}
+
+body {
+	background: var(--content-bg);
+	font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial;
+	color: #0b2447;
+}
+
+#app { min-height: 60vh; }
+
+/* Brand mark (simple square with diagonal to echo a corporate mark) */
+.brand-mark {
+	width: 30px;
+	height: 30px;
+	display: inline-block;
+	background: var(--db-blue);
+	position: relative;
+	box-shadow: 0 0 0 2px var(--db-yellow) inset;
+}
+.brand-mark::after {
+	content: '';
+	position: absolute;
+	left: 6px;
+	top: 6px;
+	width: 18px;
+	height: 2px;
+	background: var(--db-yellow);
+	transform: rotate(45deg);
+}
+
+.brand-text { font-weight: 600; color: #ffffff; }
+.navbar { background: linear-gradient(90deg, var(--db-blue), var(--db-blue-dark)); }
+.navbar .nav-link { color: rgba(255,255,255,0.9); }
+.navbar .nav-link.active, .navbar .nav-link:hover { color: #fff; font-weight:600; }
+
+.card { border: none; box-shadow: 0 1px 3px rgba(11,36,71,0.06); }
+
+.btn-primary {
+	background: var(--db-blue);
+	border-color: var(--db-blue);
+}
+.btn-primary:hover {
+	background: var(--db-blue-dark);
+	border-color: var(--db-blue-dark);
+}
+
+pre { white-space: pre-wrap; word-wrap: break-word; background: #fff; padding: 12px; border-radius: 6px; }
+
+.text-muted { color: rgba(255,255,255,0.85) !important; }

@@ -1,0 +1,31 @@
+options:
+  substitutionOption: ALLOW_LOOSE
+substitutions:
+  _REGION: "europe-west3"
+  _REPO: "regulatory-repo"
+
+images:
+  - "$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO/ingest:$SHORT_SHA"
+  - "$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO/processor:$SHORT_SHA"
+  - "$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO/frontend-node:$SHORT_SHA"
+
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', '$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO/ingest:$SHORT_SHA', '-f', 'Dockerfile.ingest', '.']
+
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', '$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO/processor:$SHORT_SHA', '-f', 'Dockerfile.processor', '.']
+
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', '$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO/frontend-node:$SHORT_SHA', '-f', 'frontend-node/Dockerfile.frontend', '.']
+
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', '$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO/ingest:$SHORT_SHA']
+
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', '$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO/processor:$SHORT_SHA']
+
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', '$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO/frontend-node:$SHORT_SHA']
+
+timeout: '1200s'

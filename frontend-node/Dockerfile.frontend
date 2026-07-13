@@ -1,0 +1,16 @@
+FROM node:18-alpine
+WORKDIR /app
+
+# Install runtime dependencies
+COPY package.json package-lock.json* ./
+RUN npm install --production
+
+# Copy server and static frontend
+COPY server.js ./
+COPY ../frontend ./frontend
+COPY mockBigQuery.js ./
+
+ENV PORT=3000
+EXPOSE 3000
+
+CMD ["node", "server.js"]
